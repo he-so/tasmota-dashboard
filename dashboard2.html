@@ -163,6 +163,7 @@
         try {
             const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(3000) });
             if (res.ok) {
+                device._online = true;
                 const data = await res.json();
                 statusEl.innerText = "Online";
                 statusEl.className = "status-pill online";
@@ -207,12 +208,28 @@
                 } catch (uiErr) {
                     // ignore UI fetch errors — device may block root page or proxy
                 }
-            } else { throw new Error(); }
+            } else { device._online = false; throw new Error(); }
         } catch (e) {
+            device._online = false;
             statusEl.innerText = "Offline";
             statusEl.className = "status-pill offline";
             versionEl.innerText = "Nicht erreichbar";
         }
+    }
+
+    // Reorder card nodes so online devices appear first
+    function sortCards() {
+        const grid = document.getElementById('grid');
+        if (!grid) return;
+        const onlineEls = [];
+        const offlineEls = [];
+        devices.forEach((d, i) => {
+            const el = document.getElementById(`card-${i}`);
+            if (!el) return;
+            if (d._online) onlineEls.push(el); else offlineEls.push(el);
+        });
+        // Append in order (moves existing nodes)
+        [...onlineEls, ...offlineEls].forEach(el => grid.appendChild(el));
     }
 
     // Parse device HTML to discover UI bindings for ids o1/o2 and detect type.
@@ -331,12 +348,13 @@
         }
 
         if (detectedType === 'switch') {
-            if (bindings.o1) {
+                if (bindings.o1) {
                 const btn = document.createElement('button');
+                btn.type = 'button';
                 btn.className = 'btn btn-toggle';
                 btn.innerText = 'Ein/Aus';
                 btn.title = bindings.o1;
-                btn.addEventListener('click', () => sendCommand(device, bindings.o1, index));
+                btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); sendCommand(device, bindings.o1, index); });
                 container.appendChild(btn);
                 return;
             }
@@ -348,12 +366,14 @@
             const downCmd = bindings.o2;
             if (upCmd) {
                 const up = document.createElement('button');
-                up.className='btn btn-up'; up.innerText='Hoch'; up.addEventListener('click', () => sendCommand(device, upCmd, index));
+                up.type = 'button';
+                up.className='btn btn-up'; up.innerText='Hoch'; up.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); sendCommand(device, upCmd, index); });
                 container.appendChild(up);
             }
             if (downCmd) {
                 const down = document.createElement('button');
-                down.className='btn btn-down'; down.innerText='Runter'; down.addEventListener('click', () => sendCommand(device, downCmd, index));
+                down.type = 'button';
+                down.className='btn btn-down'; down.innerText='Runter'; down.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); sendCommand(device, downCmd, index); });
                 container.appendChild(down);
             }
             return;
@@ -362,10 +382,10 @@
         if (detectedType === 'gate') {
             // two toggles
             if (bindings.o1) {
-                const b1 = document.createElement('button'); b1.className='btn'; b1.innerText='T1'; b1.title=bindings.o1; b1.addEventListener('click', () => sendCommand(device, bindings.o1, index)); container.appendChild(b1);
+                const b1 = document.createElement('button'); b1.type = 'button'; b1.className='btn'; b1.innerText='T1'; b1.title=bindings.o1; b1.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); sendCommand(device, bindings.o1, index); }); container.appendChild(b1);
             }
             if (bindings.o2) {
-                const b2 = document.createElement('button'); b2.className='btn'; b2.innerText='T2'; b2.title=bindings.o2; b2.addEventListener('click', () => sendCommand(device, bindings.o2, index)); container.appendChild(b2);
+                const b2 = document.createElement('button'); b2.type = 'button'; b2.className='btn'; b2.innerText='T2'; b2.title=bindings.o2; b2.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); sendCommand(device, bindings.o2, index); }); container.appendChild(b2);
             }
             return;
         }
@@ -422,9 +442,11 @@
         }
     }
 
-    function refreshAll() {
+    async function refreshAll() {
         document.getElementById('update-timer').innerText = "Update: " + new Date().toLocaleTimeString();
-        devices.forEach((d, i) => checkStatus(d, i));
+        const checks = devices.map((d, i) => checkStatus(d, i));
+        try { await Promise.all(checks); } catch (_) { /* ignore individual failures */ }
+        sortCards();
     }
 
     createCards();
