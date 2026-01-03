@@ -56,7 +56,7 @@
             font-size: 1.4rem; margin-right: 12px;
         }
 
-        .device-name { font-weight: 700; font-size: 1.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .device-name { font-weight: 700; font-size: 1.05rem; white-space: normal; word-break: break-word; }
 
         .info-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; }
         .ip-addr { font-family: monospace; font-size: 0.8rem; color: var(--text-sub); }
@@ -124,11 +124,10 @@
         `;
 
         html += devices.map((d, i) => `
-            <div class="card" id="card-${i}">
+            <a href="http://${d.ip}" target="_blank" class="card" id="card-${i}">
                 <div class="card-header">
                     <div class="icon-circle">${d.icon}</div>
                     <span class="device-name">${d.name}</span>
-                    <a href="http://${d.ip}" target="_blank" style="margin-left:auto; font-size:0.9rem; text-decoration:none">🔗</a>
                 </div>
                 <span class="version-info" id="ver-${i}">Lade Version...</span>
                 <span class="version-info" id="state-${i}"></span>
@@ -137,7 +136,7 @@
                     <span class="ip-addr">${d.ip}</span>
                     <span class="status-pill checking" id="status-${i}">Prüfen</span>
                 </div>
-            </div>
+            </a>
         `).join('');
 
         grid.innerHTML = html;
@@ -293,7 +292,12 @@
             }
         }
 
-        return result;
+        // Also look for any <td>On</td> or <td>Off</td> in the HTML (common in l1 content)
+        const tdMatch = html.match(/<td[^>]*>\s*(On|Off)\s*<\/td>/i);
+        if (tdMatch) {
+            result.state = { kind: 'switch', on: /on/i.test(tdMatch[1]) };
+            return result;
+        }
 
         return result;
     }
