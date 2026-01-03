@@ -218,12 +218,60 @@
                 statusEl.innerText = "Online";
                 statusEl.className = "status-pill online";
                 versionEl.innerText = "v" + (data.StatusFWR ? data.StatusFWR.Version : "Ok");
+                // Fetch device web UI HTML to discover available action buttons (/cm?cmnd=...)
+                try {
+                    const uiUrl = `${window.location.origin}:8080/tasmota/${device.ip}/`;
+                    const uiRes = await fetch(uiUrl, { signal: AbortSignal.timeout(3000) });
+                    if (uiRes.ok) {
+                        const html = await uiRes.text();
+                        const cmds = parseCommandsFromHtml(html);
+                        if (cmds.length) addDynamicButtons(index, device, cmds);
+                    }
+                } catch (uiErr) {
+                    // ignore UI fetch errors — device may block root page or proxy
+                }
             } else { throw new Error(); }
         } catch (e) {
             statusEl.innerText = "Offline";
             statusEl.className = "status-pill offline";
             versionEl.innerText = "Nicht erreichbar";
         }
+    }
+
+    // Parse cm?cmnd=... occurrences from device HTML and return decoded commands (unique)
+    function parseCommandsFromHtml(html) {
+        const cmds = new Set();
+        const re = /cm\?cmnd=([^"'<>\s&]+)/g;
+        let m;
+        while ((m = re.exec(html)) !== null) {
+            try {
+                const raw = decodeURIComponent(m[1].replace(/\+/g, '%20'));
+                // skip long or purely status commands
+                if (!raw || raw.length > 80) continue;
+                const key = raw.trim();
+                if (key.toLowerCase().startsWith('status')) continue;
+                cmds.add(key);
+            } catch (e) { continue; }
+        }
+        return Array.from(cmds).slice(0, 12);
+    }
+
+    // Add discovered command buttons to controls area (avoids duplicates)
+    function addDynamicButtons(index, device, commands) {
+        const container = document.getElementById(`controls-${index}`);
+        if (!container) return;
+        const existing = new Set(Array.from(container.querySelectorAll('button')).map(b => b.innerText));
+        commands.forEach(cmd => {
+            // derive short label: use first word of command
+            const label = cmd.split(' ')[0];
+            if (existing.has(label) || existing.has(cmd)) return;
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.innerText = label;
+            btn.title = cmd;
+            btn.addEventListener('click', () => sendCommand(device, cmd, index));
+            container.appendChild(btn);
+        });
     }
 
     // Send a command to a device via the proxy. updates status text while working.
