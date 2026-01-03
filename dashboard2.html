@@ -142,17 +142,6 @@
         grid.innerHTML = html;
     }
 
-    // Determine device control type from icon/name
-    function deviceType(device) {
-        const name = (device.name || '').toLowerCase();
-        if (device.icon === '🪟' || name.includes('rolladen') || name.includes('jalousie')) return 'shutter';
-        if (device.icon === '🔌' || name.includes('stecker') || device.icon === '♨️' || device.icon === '💧') return 'switch';
-        if (device.icon === '🌟' || name.includes('stern') || name.includes('lampe')) return 'switch';
-        return 'link';
-    }
-
-    /* renderControls removed: buttons are added only after web UI parsing. */
-
     async function checkStatus(device, index) {
         const statusEl = document.getElementById(`status-${index}`);
         const versionEl = document.getElementById(`ver-${index}`);
@@ -455,5 +444,4 @@
 </script>
 
 </body>
-</html>
 </html>
