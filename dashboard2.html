@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tasmota Pro Dashboard</title>
+    <style>
+        :root {
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #0f172a;
+            --text-sub: #64748b;
+            --success: #22c55e;
+            --error: #ef4444;
+            --primary: #0284c7;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 30px 15px;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; }
+        header { text-align: center; margin-bottom: 40px; }
+        h1 { margin: 0; font-size: 2.2rem; letter-spacing: -0.025em; }
+        .subtitle { color: var(--text-sub); margin-top: 5px; font-size: 0.95rem; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 20px;
+            text-decoration: none;
+            color: inherit;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            border: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.2s ease;
+        }
+
+        .card:hover { transform: translateY(-3px); box-shadow: 0 12px 20px -5px rgba(0,0,0,0.1); border-color: var(--primary); }
+
+        .card-header { display: flex; align-items: center; margin-bottom: 15px; }
+        .icon-circle {
+            width: 44px; height: 44px; background: #f0f9ff; border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.4rem; margin-right: 12px;
+        }
+
+        .device-name { font-weight: 700; font-size: 1.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        .info-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; }
+        .ip-addr { font-family: monospace; font-size: 0.8rem; color: var(--text-sub); }
+        
+        .status-pill {
+            padding: 3px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 800; text-transform: uppercase;
+            display: flex; align-items: center; gap: 4px;
+        }
+        .online { background: #dcfce7; color: #166534; }
+        .offline { background: #fee2e2; color: #991b1b; }
+        .checking { background: #f1f5f9; color: #475569; }
+
+        .version-info { font-size: 0.75rem; color: var(--text-sub); margin-top: 4px; display: block; height: 1.2em; }
+        .controls { margin-top: 10px; display:flex; gap:8px; flex-wrap:wrap; }
+        .btn { padding:6px 10px; border-radius:8px; font-size:0.85rem; border:1px solid #cbd5e1; background:#fff; cursor:pointer; }
+        .btn:active { transform:translateY(1px); }
+        .btn-toggle { background: linear-gradient(#f8fafc,#fff); }
+        .btn-up { background: linear-gradient(#fff,#f0f9ff); }
+        .btn-down { background: linear-gradient(#fff,#fff5f5); }
+        .card.global { text-align:center; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>Smart Home Dashboard</h1>
+        <p class="subtitle" id="update-timer">Initialisiere Geräte...</p>
+    </header>
+
+    <div class="grid" id="grid"></div>
+</div>
+
+<script>
+    // Konfiguration der Geräte
+    const devices = [
+        { ip: "192.168.178.33", name: "Stecker Wohnzimmer vorne", icon: "🔌" },
+        { ip: "192.168.178.32", name: "Stecker Wohnzimmer hinten", icon: "🔌" },
+        { ip: "192.168.178.31", name: "Stecker Esszimmer", icon: "🔌" },
+        { ip: "192.168.178.78", name: "Stern Esszimmer", icon: "🌟" },
+        { ip: "192.168.178.22", name: "Rolladen Wohnzimmer", icon: "🪟" },
+        { ip: "192.168.178.47", name: "Drehtor", icon: "🚧" },
+        { ip: "192.168.178.26", name: "Stecker Entfeuchter", icon: "💧" },
+        { ip: "192.168.178.25", name: "Stecker FBH-Bad", icon: "♨️" },
+        { ip: "192.168.178.28", name: "Rolladen Büro", icon: "🪟" },
+        { ip: "192.168.178.23", name: "Rolladen Esszimmer", icon: "🪟" },
+        { ip: "192.168.178.24", name: "Rolladen Schlafzimmer", icon: "🪟" },
+        { ip: "192.168.178.77", name: "Schneeflocke", icon: "❄️" },
+        { ip: "192.168.178.74", name: "Stern Wohnzimmer vorne", icon: "🌟" },
+        { ip: "192.168.178.27", name: "Mini Haustür", icon: "🚪" }
+    ];
+
+    const grid = document.getElementById('grid');
+
+    function createCards() {
+        // Add global control card first
+        let html = `
+            <div class="card global" id="card-all">
+                <div class="card-header">
+                    <div class="icon-circle">⚡</div>
+                    <span class="device-name">Alles aus (Stecker & Lampen)</span>
+                </div>
+                <div class="controls"><button class="btn" id="btn-all-off">Alles aus</button></div>
+            </div>
+        `;
+
+        html += devices.map((d, i) => `
+            <div class="card" id="card-${i}">
+                <div class="card-header">
+                    <div class="icon-circle">${d.icon}</div>
+                    <span class="device-name">${d.name}</span>
+                    <a href="http://${d.ip}" target="_blank" style="margin-left:auto; font-size:0.9rem; text-decoration:none">🔗</a>
+                </div>
+                <span class="version-info" id="ver-${i}">Lade Version...</span>
+                <div class="controls" id="controls-${i}"></div>
+                <div class="info-row">
+                    <span class="ip-addr">${d.ip}</span>
+                    <span class="status-pill checking" id="status-${i}">Prüfen</span>
+                </div>
+            </div>
+        `).join('');
+
+        grid.innerHTML = html;
+    }
+
+    // Determine device control type from icon/name
+    function deviceType(device) {
+        const name = (device.name || '').toLowerCase();
+        if (device.icon === '🪟' || name.includes('rolladen') || name.includes('jalousie')) return 'shutter';
+        if (device.icon === '🔌' || name.includes('stecker') || device.icon === '♨️' || device.icon === '💧') return 'switch';
+        if (device.icon === '🌟' || name.includes('stern') || name.includes('lampe')) return 'switch';
+        return 'link';
+    }
+
+    function renderControls() {
+        devices.forEach((d, i) => {
+            const type = deviceType(d);
+            const el = document.getElementById(`controls-${i}`);
+            if (!el) return;
+            el.innerHTML = '';
+            if (type === 'switch') {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-toggle';
+                btn.innerText = 'Ein/Aus';
+                btn.addEventListener('click', () => sendCommand(d, 'Power TOGGLE', i));
+                const btnOff = document.createElement('button');
+                btnOff.className = 'btn';
+                btnOff.innerText = 'Aus';
+                btnOff.addEventListener('click', () => sendCommand(d, 'Power OFF', i));
+                el.appendChild(btn);
+                el.appendChild(btnOff);
+            } else if (type === 'shutter') {
+                const up = document.createElement('button');
+                up.className = 'btn btn-up';
+                up.innerText = 'Hoch';
+                up.addEventListener('click', () => sendCommand(d, 'Shutter1 UP', i));
+                const down = document.createElement('button');
+                down.className = 'btn btn-down';
+                down.innerText = 'Runter';
+                down.addEventListener('click', () => sendCommand(d, 'Shutter1 DOWN', i));
+                const stop = document.createElement('button');
+                stop.className = 'btn';
+                stop.innerText = 'Stop';
+                stop.addEventListener('click', () => sendCommand(d, 'Shutter1 STOP', i));
+                el.appendChild(up);
+                el.appendChild(down);
+                el.appendChild(stop);
+            } else {
+                // no controls for generic devices
+            }
+        });
+
+        // global all-off button
+        const allOff = document.getElementById('btn-all-off');
+        if (allOff) {
+            allOff.addEventListener('click', async () => {
+                allOff.disabled = true;
+                allOff.innerText = 'Sende...';
+                const sockets = devices.filter(d => deviceType(d) === 'switch');
+                for (const d of sockets) {
+                    await sendCommand(d, 'Power OFF');
+                }
+                setTimeout(() => { allOff.disabled = false; allOff.innerText = 'Alles aus'; refreshAll(); }, 800);
+            });
+        }
+    }
+
+    async function checkStatus(device, index) {
+        const statusEl = document.getElementById(`status-${index}`);
+        const versionEl = document.getElementById(`ver-${index}`);
+        
+        // Der Pfad nutzt jetzt deinen Nginx Proxy: /tasmota/IP/cmnd...
+        const proxyUrl = `${window.location.origin}:8080/tasmota/${device.ip}/cm?cmnd=Status 2`;
+
+        try {
+            const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(3000) });
+            if (res.ok) {
+                const data = await res.json();
+                statusEl.innerText = "Online";
+                statusEl.className = "status-pill online";
+                versionEl.innerText = "v" + (data.StatusFWR ? data.StatusFWR.Version : "Ok");
+            } else { throw new Error(); }
+        } catch (e) {
+            statusEl.innerText = "Offline";
+            statusEl.className = "status-pill offline";
+            versionEl.innerText = "Nicht erreichbar";
+        }
+    }
+
+    // Send a command to a device via the proxy. updates status text while working.
+    async function sendCommand(device, cmd, index) {
+        const statusEl = index != null ? document.getElementById(`status-${index}`) : null;
+        if (statusEl) { statusEl.innerText = 'Sende'; statusEl.className = 'status-pill checking'; }
+        const proxyUrl = `${window.location.origin}:8080/tasmota/${device.ip}/cm?cmnd=${encodeURIComponent(cmd)}`;
+        try {
+            const res = await fetch(proxyUrl, { method: 'GET', signal: AbortSignal.timeout(4000) });
+            if (res.ok) {
+                if (statusEl) { statusEl.innerText = 'Online'; statusEl.className = 'status-pill online'; }
+                return await res.json();
+            } else {
+                throw new Error('http');
+            }
+        } catch (e) {
+            if (statusEl) { statusEl.innerText = 'Fehler'; statusEl.className = 'status-pill offline'; }
+            return null;
+        }
+    }
+
+    function refreshAll() {
+        document.getElementById('update-timer').innerText = "Update: " + new Date().toLocaleTimeString();
+        devices.forEach((d, i) => checkStatus(d, i));
+    }
+
+    createCards();
+    renderControls();
+    refreshAll();
+    setInterval(refreshAll, 60000); // Jede Minute aktualisieren
+</script>
+
+</body>
+</html>
+</html>
