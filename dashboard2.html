@@ -119,7 +119,7 @@
                     <div class="icon-circle">⚡</div>
                     <span class="device-name">Alles aus (Stecker & Lampen)</span>
                 </div>
-                <div class="controls"><button class="btn" id="btn-all-off">Alles aus</button></div>
+                        <div class="controls" id="controls-all"></div>
             </div>
         `;
 
@@ -151,58 +151,7 @@
         return 'link';
     }
 
-    function renderControls() {
-        devices.forEach((d, i) => {
-            const type = deviceType(d);
-            const el = document.getElementById(`controls-${i}`);
-            if (!el) return;
-            el.innerHTML = '';
-            if (type === 'switch') {
-                const btn = document.createElement('button');
-                btn.className = 'btn btn-toggle';
-                btn.innerText = 'Ein/Aus';
-                btn.addEventListener('click', () => sendCommand(d, 'Power TOGGLE', i));
-                const btnOff = document.createElement('button');
-                btnOff.className = 'btn';
-                btnOff.innerText = 'Aus';
-                btnOff.addEventListener('click', () => sendCommand(d, 'Power OFF', i));
-                el.appendChild(btn);
-                el.appendChild(btnOff);
-            } else if (type === 'shutter') {
-                const up = document.createElement('button');
-                up.className = 'btn btn-up';
-                up.innerText = 'Hoch';
-                up.addEventListener('click', () => sendCommand(d, 'Shutter1 UP', i));
-                const down = document.createElement('button');
-                down.className = 'btn btn-down';
-                down.innerText = 'Runter';
-                down.addEventListener('click', () => sendCommand(d, 'Shutter1 DOWN', i));
-                const stop = document.createElement('button');
-                stop.className = 'btn';
-                stop.innerText = 'Stop';
-                stop.addEventListener('click', () => sendCommand(d, 'Shutter1 STOP', i));
-                el.appendChild(up);
-                el.appendChild(down);
-                el.appendChild(stop);
-            } else {
-                // no controls for generic devices
-            }
-        });
-
-        // global all-off button
-        const allOff = document.getElementById('btn-all-off');
-        if (allOff) {
-            allOff.addEventListener('click', async () => {
-                allOff.disabled = true;
-                allOff.innerText = 'Sende...';
-                const sockets = devices.filter(d => deviceType(d) === 'switch');
-                for (const d of sockets) {
-                    await sendCommand(d, 'Power OFF');
-                }
-                setTimeout(() => { allOff.disabled = false; allOff.innerText = 'Alles aus'; refreshAll(); }, 800);
-            });
-        }
-    }
+    /* renderControls removed: buttons are added only after web UI parsing. */
 
     async function checkStatus(device, index) {
         const statusEl = document.getElementById(`status-${index}`);
@@ -222,11 +171,11 @@
                 try {
                     const uiUrl = `${window.location.origin}:8080/tasmota/${device.ip}/`;
                     const uiRes = await fetch(uiUrl, { signal: AbortSignal.timeout(3000) });
-                    if (uiRes.ok) {
-                        const html = await uiRes.text();
-                        const cmds = parseCommandsFromHtml(html);
-                        if (cmds.length) addDynamicButtons(index, device, cmds);
-                    }
+                        if (uiRes.ok) {
+                            const html = await uiRes.text();
+                            const parsed = parseCommandsAndBindingsFromHtml(html);
+                            if (parsed) addDynamicButtons(index, device, parsed.bindings, parsed.type);
+                        }
                 } catch (uiErr) {
                     // ignore UI fetch errors — device may block root page or proxy
                 }
@@ -238,39 +187,102 @@
         }
     }
 
-    // Parse cm?cmnd=... occurrences from device HTML and return decoded commands (unique)
-    function parseCommandsFromHtml(html) {
-        const cmds = new Set();
-        const re = /cm\?cmnd=([^"'<>\s&]+)/g;
-        let m;
-        while ((m = re.exec(html)) !== null) {
-            try {
-                const raw = decodeURIComponent(m[1].replace(/\+/g, '%20'));
-                // skip long or purely status commands
-                if (!raw || raw.length > 80) continue;
-                const key = raw.trim();
-                if (key.toLowerCase().startsWith('status')) continue;
-                cmds.add(key);
-            } catch (e) { continue; }
-        }
-        return Array.from(cmds).slice(0, 12);
+    // Parse device HTML to discover UI bindings for ids o1/o2 and detect type.
+    function parseCommandsAndBindingsFromHtml(html) {
+        const result = { bindings: {}, type: null };
+        if (!html) return result;
+
+        const hasO1 = /id=["']o1["']/i.test(html);
+        const hasO2 = /id=["']o2["']/i.test(html);
+        const hasShutterText = />\s*Shutter\s*1\s*</i.test(html);
+
+        if (hasO1 && hasO2 && hasShutterText) result.type = 'shutter';
+        else if (hasO1 && hasO2) result.type = 'gate';
+        else if (hasO1) result.type = 'switch';
+        else result.type = null;
+
+        // attempt to find ?o=1 or ?o=2 bindings near the o1/o2 elements
+        const bindIds = ['o1','o2'];
+        bindIds.forEach(id => {
+            const idRe = new RegExp("id=[\"']" + id + "[\"'][\\s\\S]{0,300}", 'i');
+            const idMatch = html.match(idRe);
+            if (idMatch) {
+                const snippet = idMatch[0];
+                const oMatch = snippet.match(/\?o=(\d)/i) || html.slice(html.indexOf(idMatch[0]), html.indexOf(idMatch[0]) + 500).match(/\?o=(\d)/i);
+                if (oMatch) result.bindings[id] = '/?o=' + oMatch[1];
+            }
+        });
+
+        return result;
     }
 
-    // Add discovered command buttons to controls area (avoids duplicates)
-    function addDynamicButtons(index, device, commands) {
+    // Add discovered command buttons to controls area. If bindings provided use them (o1/o2).
+    function addDynamicButtons(index, device, bindings = {}, detectedType = null) {
         const container = document.getElementById(`controls-${index}`);
         if (!container) return;
-        const existing = new Set(Array.from(container.querySelectorAll('button')).map(b => b.innerText));
+        // replace existing dynamic controls
+        container.innerHTML = '';
+
+        // ensure global "Alles aus" button exists once we have dynamic controls
+        const globalContainer = document.getElementById('controls-all');
+        if (globalContainer && !document.getElementById('btn-all-off')) {
+            const allOff = document.createElement('button');
+            allOff.id = 'btn-all-off';
+            allOff.className = 'btn';
+            allOff.innerText = 'Alles aus';
+            allOff.addEventListener('click', async () => {
+                allOff.disabled = true;
+                allOff.innerText = 'Sende...';
+                const sockets = devices.filter(d => deviceType(d) === 'switch');
+                for (const d of sockets) {
+                    await sendCommand(d, 'Power OFF');
+                }
+                setTimeout(() => { allOff.disabled = false; allOff.innerText = 'Alles aus'; refreshAll(); }, 800);
+            });
+            globalContainer.appendChild(allOff);
+        }
+
+        if (detectedType === 'switch') {
+            if (bindings.o1) {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-toggle';
+                btn.innerText = 'Ein/Aus';
+                btn.title = bindings.o1;
+                btn.addEventListener('click', () => sendCommand(device, bindings.o1, index));
+                container.appendChild(btn);
+                return;
+            }
+        }
+
+        if (detectedType === 'shutter') {
+            // prefer bindings if available
+            const upCmd = bindings.o1 || commands.find(c => /up/i.test(c)) || commands[0];
+            const downCmd = bindings.o2 || commands.find(c => /down/i.test(c)) || commands[1] || commands[0];
+            const stopCmd = commands.find(c => /stop/i.test(c));
+            const up = document.createElement('button'); up.className='btn btn-up'; up.innerText='Hoch'; up.addEventListener('click', () => sendCommand(device, upCmd, index));
+            const down = document.createElement('button'); down.className='btn btn-down'; down.innerText='Runter'; down.addEventListener('click', () => sendCommand(device, downCmd, index));
+            container.appendChild(up); container.appendChild(down);
+            if (stopCmd) { const s = document.createElement('button'); s.className='btn'; s.innerText='Stop'; s.addEventListener('click', () => sendCommand(device, stopCmd, index)); container.appendChild(s); }
+            return;
+        }
+
+        if (detectedType === 'gate') {
+            // two toggles
+            if (bindings.o1) {
+                const b1 = document.createElement('button'); b1.className='btn'; b1.innerText='T1'; b1.title=bindings.o1; b1.addEventListener('click', () => sendCommand(device, bindings.o1, index)); container.appendChild(b1);
+            }
+            if (bindings.o2) {
+                const b2 = document.createElement('button'); b2.className='btn'; b2.innerText='T2'; b2.title=bindings.o2; b2.addEventListener('click', () => sendCommand(device, bindings.o2, index)); container.appendChild(b2);
+            }
+            return;
+        }
+
+        // Fallback: create buttons from discovered commands
+        const existing = new Set();
         commands.forEach(cmd => {
-            // derive short label: use first word of command
             const label = cmd.split(' ')[0];
-            if (existing.has(label) || existing.has(cmd)) return;
-            const btn = document.createElement('button');
-            btn.className = 'btn';
-            btn.innerText = label;
-            btn.title = cmd;
-            btn.addEventListener('click', () => sendCommand(device, cmd, index));
-            container.appendChild(btn);
+            if (existing.has(label)) return; existing.add(label);
+            const btn = document.createElement('button'); btn.className='btn'; btn.innerText=label; btn.title=cmd; btn.addEventListener('click', () => sendCommand(device, cmd, index)); container.appendChild(btn);
         });
     }
 
@@ -278,12 +290,24 @@
     async function sendCommand(device, cmd, index) {
         const statusEl = index != null ? document.getElementById(`status-${index}`) : null;
         if (statusEl) { statusEl.innerText = 'Sende'; statusEl.className = 'status-pill checking'; }
-        const proxyUrl = `${window.location.origin}:8080/tasmota/${device.ip}/cm?cmnd=${encodeURIComponent(cmd)}`;
+
+        let proxyUrl;
+        const origin = window.location.origin;
+        // If cmd looks like a UI action (/ ?o=1) call the root URL with that suffix
+        if (typeof cmd === 'string' && (cmd.startsWith('/') || cmd.startsWith('?') || /\bo=\d\b/.test(cmd))) {
+            const suffix = cmd.startsWith('/') ? cmd : (cmd.startsWith('?') ? '/' + cmd : '/' + cmd);
+            proxyUrl = `${origin}:8080/tasmota/${device.ip}${suffix}`;
+        } else {
+            // default: use /cm?cmnd= command
+            proxyUrl = `${origin}:8080/tasmota/${device.ip}/cm?cmnd=${encodeURIComponent(cmd)}`;
+        }
+
         try {
             const res = await fetch(proxyUrl, { method: 'GET', signal: AbortSignal.timeout(4000) });
             if (res.ok) {
                 if (statusEl) { statusEl.innerText = 'Online'; statusEl.className = 'status-pill online'; }
-                return await res.json();
+                // attempt to parse json, fall back to text
+                try { return await res.json(); } catch (_) { return await res.text(); }
             } else {
                 throw new Error('http');
             }
@@ -299,7 +323,6 @@
     }
 
     createCards();
-    renderControls();
     refreshAll();
     setInterval(refreshAll, 60000); // Jede Minute aktualisieren
 </script>
