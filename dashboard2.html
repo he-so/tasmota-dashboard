@@ -187,6 +187,21 @@
                                         if (device._state.kind === 'shutter') stateEl.innerText = 'Pos: ' + device._state.pos + '%';
                                         else if (device._state.kind === 'switch') stateEl.innerText = device._state.on ? 'Status: Ein' : 'Status: Aus';
                                     }
+                                } else if (parsed.type === 'switch') {
+                                    // try fetching .?m=1 to get live l1 status (single targeted request)
+                                    try {
+                                        const statusUrl = `${window.location.origin}:8080/tasmota/${device.ip}/?m=1`;
+                                        const statusRes = await fetch(statusUrl, { signal: AbortSignal.timeout(2500) });
+                                        if (statusRes.ok) {
+                                            const statusHtml = await statusRes.text();
+                                            const parsed2 = parseCommandsAndBindingsFromHtml(statusHtml);
+                                            if (parsed2 && parsed2.state) {
+                                                device._state = parsed2.state;
+                                                const stateEl2 = document.getElementById(`state-${index}`);
+                                                if (stateEl2) stateEl2.innerText = device._state.on ? 'Status: Ein' : 'Status: Aus';
+                                            }
+                                        }
+                                    } catch (e) { /* ignore */ }
                                 }
                             }
                         }
@@ -234,6 +249,23 @@
                 }
             }
         });
+
+        // Parse placeholder response format used by Tasmota ?m=1: {s}Label{m}Value{e}
+        const placeholderRe = /\{s\}([^{}]+)\{m\}([^{}]+)\{e\}/g;
+        let ph;
+        while ((ph = placeholderRe.exec(html)) !== null) {
+            const label = ph[1].trim();
+            const value = ph[2].trim();
+            if (/power/i.test(label) && /on|off/i.test(value)) {
+                result.state = { kind: 'switch', on: /on/i.test(value) };
+                return result;
+            }
+            // some devices may return numeric values here (e.g. position)
+            if (/position|pos|level|brightness|dimmer/i.test(label)) {
+                const n = parseInt(value, 10);
+                if (!isNaN(n)) { result.state = { kind: 'shutter', pos: n }; return result; }
+            }
+        }
 
         // Extract basic device state from the page HTML (best-effort, no extra polls)
         // Shutter: look for input[type=range] value near 'Shutter 1' or any range value
