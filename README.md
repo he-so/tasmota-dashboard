@@ -5,7 +5,7 @@ policy prevents any interaction with the tasmota devices, like polling the tasmo
 version or getting the relay state or sending toggle commands.
 
 The general working principle would be like this:
-                                                                                    
+```                                                                                    
  ┌────────────┐┌───────────────┐┌─────────────────┐┌────────────┐┌────────────┐     
  │PC (Browser)││nginx Webserver││nginx Webserver  ││Tasmota1    ││Tasmota2    │     
  │192.168.0.50││192.168.0.10:80││192.168.0.10:8080││192.168.0.20││291.168.0.21│     
@@ -27,8 +27,8 @@ The general working principle would be like this:
        │               │                │                │             │            
        │               │                │                │             │            
        │               │                │                │             │            
-       │               │                │                │             │            
-                                                                                    
+       │               │                │                │             │
+```                                                                               
                                                                                     
   (1) http://192.168.0.10:8080/tasmota/192.168.0.20/cm?cmnd=Status%202                                                   
   (2) http://192.168.0.20/cm?cmnd=Status%202                                                                                                                      
