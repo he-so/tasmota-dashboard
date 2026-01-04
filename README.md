@@ -1,5 +1,9 @@
 This is a web based dashboard, showing your tasmota devices.
 
+<img width="1239" height="910" alt="dashboard" src="https://github.com/user-attachments/assets/988ecd4a-e1b2-4ee7-9109-f5803a8e0fc1" />
+
+*Installation*
+
 For installation, you need a reverse proxy running, because otherwise CORS
 policy prevents any interaction with the tasmota devices, like polling the tasmota
 version or getting the relay state or sending toggle commands.
