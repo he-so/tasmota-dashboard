@@ -15,6 +15,17 @@
             --primary: #0284c7;
         }
 
+        /* Dark mode overrides applied when <body> has class 'dark' */
+        body.dark {
+            --bg-color: #0b1220;
+            --card-bg: #0f1724;
+            --text-main: #e6eef8;
+            --text-sub: #9fb3c9;
+            --success: #34d399;
+            --error: #fb7185;
+            --primary: #38bdf8;
+        }
+
         body {
             font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--bg-color);
@@ -84,7 +95,10 @@
 <div class="container">
     <header>
         <h1>Smart Home Dashboard</h1>
-        <p class="subtitle" id="update-timer">Initialisiere Geräte...</p>
+        <div style="display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;">
+            <p class="subtitle" id="update-timer">Initialisiere Geräte...</p>
+            <button id="dark-toggle" type="button" class="btn" aria-pressed="false">Dunkelmodus</button>
+        </div>
     </header>
 
     <div class="grid" id="grid"></div>
@@ -106,7 +120,8 @@
         { ip: "192.168.178.24", name: "Rolladen Schlafzimmer", icon: "🪟" },
         { ip: "192.168.178.77", name: "Schneeflocke", icon: "❄️" },
         { ip: "192.168.178.74", name: "Stern Wohnzimmer vorne", icon: "🌟" },
-        { ip: "192.168.178.27", name: "Mini Haustür", icon: "🚪" }
+        { ip: "192.168.178.27", name: "Mini Haustür", icon: "🚪" },
+        { ip: "192.168.178.85", name: "LED Birne Wohnzimmer", icon: "💡" }
     ];
 
     const grid = document.getElementById('grid');
@@ -438,6 +453,32 @@
         sortCards();
     }
 
+    // Dark mode helpers: persist selection in sessionStorage per browser session
+    function applyDarkMode(enabled) {
+        if (enabled) document.body.classList.add('dark'); else document.body.classList.remove('dark');
+        const btn = document.getElementById('dark-toggle');
+        if (btn) {
+            btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+            // button shows the action it will perform when clicked
+            btn.innerText = enabled ? 'Hellmodus' : 'Dunkelmodus';
+        }
+    }
+
+    function initDarkMode() {
+        try {
+            const stored = sessionStorage.getItem('darkMode');
+            const enabled = stored === '1';
+            applyDarkMode(enabled);
+        } catch (e) { /* ignore storage errors */ }
+        const btn = document.getElementById('dark-toggle');
+        if (btn) btn.addEventListener('click', () => {
+            const now = !document.body.classList.contains('dark');
+            applyDarkMode(now);
+            try { sessionStorage.setItem('darkMode', now ? '1' : '0'); } catch (e) { }
+        });
+    }
+
+    initDarkMode();
     createCards();
     refreshAll();
     setInterval(refreshAll, 60000); // Jede Minute aktualisieren
