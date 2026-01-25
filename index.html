@@ -52,13 +52,41 @@
             text-decoration: none;
             color: inherit;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-            border: 1px solid #e2e8f0;
+            border: 2px solid #e2e8f0;
             display: flex;
             flex-direction: column;
             transition: all 0.2s ease;
+            position: relative;
         }
 
-        .card:hover { transform: translateY(-3px); box-shadow: 0 12px 20px -5px rgba(0,0,0,0.1); border-color: var(--primary); }
+        .card.online {
+            border-color: #22c55e;
+            box-shadow: 0 0 15px rgba(34, 197, 94, 0.2);
+        }
+
+        .card.offline {
+            border-color: #ef4444;
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.2);
+            opacity: 0.7;
+        }
+
+        .card.checking {
+            border-color: #f59e0b;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
+        }
+
+        .card:hover { transform: translateY(-3px); box-shadow: 0 12px 20px -5px rgba(0,0,0,0.1), 0 0 15px rgba(0,0,0,0.15); border-color: var(--primary); }
+
+        .wifi-signal {
+            position: absolute; top: 12px; right: 12px;
+            display: flex; gap: 2px; align-items: flex-end;
+            opacity: 0.6;
+        }
+        .signal-bar {
+            width: 3px; background: #64748b; border-radius: 1px;
+        }
+        .signal-bar.active { background: #0284c7; opacity: 1; }
+        .card.offline .signal-bar { background: #cbd5e1; }
 
         .card-header { display: flex; align-items: center; margin-bottom: 15px; }
         .icon-circle {
@@ -73,14 +101,15 @@
         .ip-addr { font-family: monospace; font-size: 0.8rem; color: var(--text-sub); }
         
         .status-pill {
-            padding: 3px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 800; text-transform: uppercase;
+            padding: 6px 12px; border-radius: 8px; font-size: 0.85rem; font-weight: 800; text-transform: uppercase;
             display: flex; align-items: center; gap: 4px;
         }
         .online { background: #dcfce7; color: #166534; }
         .offline { background: #fee2e2; color: #991b1b; }
-        .checking { background: #f1f5f9; color: #475569; }
+        .checking { background: #fef3c7; color: #92400e; }
 
         .version-info { font-size: 0.75rem; color: var(--text-sub); margin-top: 4px; display: block; height: 1.2em; }
+        .state-display { font-size: 1rem; font-weight: 600; color: var(--text-main); margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.02); border-radius: 8px; text-align: center; }
         .controls { margin-top: 10px; display:flex; gap:8px; flex-wrap:wrap; }
         .btn { padding:6px 10px; border-radius:8px; font-size:0.85rem; border:1px solid #cbd5e1; background:#fff; cursor:pointer; }
         .btn:active { transform:translateY(1px); }
@@ -139,13 +168,19 @@
         `;
 
         html += devices.map((d, i) => `
-            <a href="http://${d.ip}" target="_blank" class="card" id="card-${i}">
+            <a href="http://${d.ip}" target="_blank" class="card checking" id="card-${i}">
+                <div class="wifi-signal" id="wifi-${i}">
+                    <div class="signal-bar" style="height: 4px;"></div>
+                    <div class="signal-bar" style="height: 6px;"></div>
+                    <div class="signal-bar" style="height: 8px;"></div>
+                    <div class="signal-bar" style="height: 10px;"></div>
+                </div>
                 <div class="card-header">
                     <div class="icon-circle">${d.icon}</div>
                     <span class="device-name">${d.name}</span>
                 </div>
                 <span class="version-info" id="ver-${i}">Lade Version...</span>
-                <span class="version-info" id="state-${i}"></span>
+                <div class="state-display" id="state-${i}">—</div>
                 <div class="controls" id="controls-${i}"></div>
                 <div class="info-row">
                     <span class="ip-addr">${d.ip}</span>
@@ -160,9 +195,10 @@
     async function checkStatus(device, index) {
         const statusEl = document.getElementById(`status-${index}`);
         const versionEl = document.getElementById(`ver-${index}`);
+        const cardEl = document.getElementById(`card-${index}`);
         
         // Der Pfad nutzt jetzt deinen Nginx Proxy: /tasmota/IP/cmnd...
-        const proxyUrl = `${window.location.origin}:8080/tasmota/${device.ip}/cm?cmnd=Status 2`;
+        const proxyUrl = `${window.location.origin}:8080/tasmota/${device.ip}/cm?cmnd=Status0`;
 
         try {
             const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(3000) });
@@ -171,7 +207,11 @@
                 const data = await res.json();
                 statusEl.innerText = "Online";
                 statusEl.className = "status-pill online";
+                cardEl.className = "card online";
                 versionEl.innerText = "v" + (data.StatusFWR ? data.StatusFWR.Version : "Ok");
+                if (data.StatusSTS && data.StatusSTS.Wifi && data.StatusSTS.Wifi.RSSI) {
+                    updateSignalStrength(data.StatusSTS.Wifi.RSSI, index);
+                }
                 // Fetch device web UI HTML to discover available action buttons (/cm?cmnd=...)
                 try {
                     const uiUrl = `${window.location.origin}:8080/tasmota/${device.ip}/`;
@@ -188,8 +228,8 @@
                                 if (device._state) {
                                     const stateEl = document.getElementById(`state-${index}`);
                                     if (stateEl) {
-                                        if (device._state.kind === 'shutter') stateEl.innerText = 'Pos: ' + device._state.pos + '%';
-                                        else if (device._state.kind === 'switch') stateEl.innerText = device._state.on ? 'Status: Ein' : 'Status: Aus';
+                                        if (device._state.kind === 'shutter') stateEl.innerText = 'Position: ' + device._state.pos + '%';
+                                        else if (device._state.kind === 'switch') stateEl.innerText = device._state.on ? '🟢 Ein' : '⚫ Aus';
                                     }
                                 } else if (parsed.type === 'switch') {
                                     // try fetching .?m=1 to get live l1 status (single targeted request)
@@ -202,7 +242,7 @@
                                             if (parsed2 && parsed2.state) {
                                                 device._state = parsed2.state;
                                                 const stateEl2 = document.getElementById(`state-${index}`);
-                                                if (stateEl2) stateEl2.innerText = device._state.on ? 'Status: Ein' : 'Status: Aus';
+                                                if (stateEl2) stateEl2.innerText = device._state.on ? '🟢 Ein' : '⚫ Aus';
                                             }
                                         }
                                     } catch (e) { /* ignore */ }
@@ -217,7 +257,11 @@
             device._online = false;
             statusEl.innerText = "Offline";
             statusEl.className = "status-pill offline";
+            cardEl.className = "card offline";
             versionEl.innerText = "Nicht erreichbar";
+            const stateEl = document.getElementById(`state-${index}`);
+            if (stateEl) stateEl.innerText = '—';
+            updateSignalStrength(-100, index);
         }
     }
 
@@ -234,6 +278,19 @@
         });
         // Append in order (moves existing nodes)
         [...onlineEls, ...offlineEls].forEach(el => grid.appendChild(el));
+    }
+
+    function updateSignalStrength(rssi, index) {
+        const wifiEl = document.getElementById(`wifi-${index}`);
+        if (!wifiEl) return;
+        const bars = wifiEl.querySelectorAll('.signal-bar');
+        let strength = 0;
+        if (rssi > -50) strength = 4;
+        else if (rssi > -60) strength = 3;
+        else if (rssi > -70) strength = 2;
+        else if (rssi > -80) strength = 1;
+        else strength = 0;
+        bars.forEach((bar, i) => bar.classList.toggle('active', i < strength));
     }
 
     // Parse device HTML to discover UI bindings for ids o1/o2 and detect type.
