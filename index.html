@@ -80,13 +80,13 @@
         .wifi-signal {
             position: absolute; top: 12px; right: 12px;
             display: flex; gap: 2px; align-items: flex-end;
-            opacity: 0.6;
+            opacity: 0.9;
         }
         .signal-bar {
-            width: 3px; background: #64748b; border-radius: 1px;
+            width: 3px; background: #cbd5e1; border-radius: 1px;
         }
         .signal-bar.active { background: #0284c7; opacity: 1; }
-        .card.offline .signal-bar { background: #cbd5e1; }
+        .card.offline .signal-bar { background: #e2e8f0; }
 
         .card-header { display: flex; align-items: center; margin-bottom: 15px; }
         .icon-circle {
@@ -117,6 +117,29 @@
         .btn-up { background: linear-gradient(#fff,#f0f9ff); }
         .btn-down { background: linear-gradient(#fff,#fff5f5); }
         .card.global { text-align:center; }
+
+        .hidden { display: none !important; }
+        .view-toggle { display: inline-flex; align-items: center; gap: 6px; }
+        .summary-table { background: var(--card-bg); border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow: hidden; }
+        .summary-table table { width: 100%; border-collapse: collapse; }
+        .summary-table th,
+        .summary-table td { text-align: left; padding: 12px 14px; border-bottom: 1px solid #e2e8f0; font-size: 0.95rem; }
+        .summary-table th { background: rgba(2,132,199,0.08); color: var(--text-main); font-weight: 700; }
+        .summary-table td { color: var(--text-sub); }
+        .summary-table tr:last-child td { border-bottom: none; }
+        .summary-name { display: flex; align-items: center; gap: 8px; }
+        .summary-name .icon-circle { width: 28px; height: 28px; font-size: 1rem; margin: 0; }
+        .signal-text { font-family: monospace; }
+        .col-name,
+        .col-status,
+        .col-state { display: none; }
+        @media (min-width: 580px) {
+            .col-name { display: table-cell; }
+        }
+        @media (min-width: 900px) {
+            .col-status,
+            .col-state { display: table-cell; }
+        }
     </style>
 </head>
 <body>
@@ -126,14 +149,16 @@
         <h1>Smart Home Dashboard</h1>
         <div style="display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;">
             <p class="subtitle" id="update-timer">Initialisiere Geräte...</p>
+            <button id="view-toggle" type="button" class="btn view-toggle" aria-pressed="false">Tabelle</button>
             <button id="dark-toggle" type="button" class="btn" aria-pressed="false">Dunkelmodus</button>
         </div>
     </header>
 
-    <div class="grid" id="grid"></div>
-</div>
-
-<script>
+    <div id="view-container">
+        <div class="grid" id="cards-view"></div>
+        <div class="table-wrapper hidden" id="table-view"></div>
+    </div>
+    <script>
     // Konfiguration der Geräte
     const devices = [
         { ip: "192.168.178.33", name: "Stecker Wohnzimmer vorne", icon: "🔌" },
@@ -153,7 +178,10 @@
         { ip: "192.168.178.85", name: "LED Birne Wohnzimmer", icon: "💡" }
     ];
 
-    const grid = document.getElementById('grid');
+    let currentView = 'cards';
+    const viewButton = document.getElementById('view-toggle');
+    const cardsContainer = document.getElementById('cards-view');
+    const tableContainer = document.getElementById('table-view');
 
     function createCards() {
         // Add global control card first
@@ -169,7 +197,7 @@
 
         html += devices.map((d, i) => `
             <a href="http://${d.ip}" target="_blank" class="card checking" id="card-${i}">
-                <div class="wifi-signal" id="wifi-${i}">
+                <div class="wifi-signal" id="wifi-${i}" title="Signal: —">
                     <div class="signal-bar" style="height: 4px;"></div>
                     <div class="signal-bar" style="height: 6px;"></div>
                     <div class="signal-bar" style="height: 8px;"></div>
@@ -189,7 +217,79 @@
             </a>
         `).join('');
 
-        grid.innerHTML = html;
+        cardsContainer.innerHTML = html;
+    }
+
+    function createTable() {
+        const html = `
+            <div class="summary-table">
+                <table id="device-table">
+                    <thead>
+                        <tr>
+                            <th class="col-name">Name</th>
+                            <th>IP</th>
+                            <th>Signal</th>
+                            <th>Version</th>
+                            <th class="col-status">Status</th>
+                            <th class="col-state">Zustand</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${devices.map((d, i) => `
+                            <tr id="row-${i}" class="checking">
+                                <td class="col-name"><div class="summary-name"><span class="icon-circle">${d.icon}</span><span>${d.name}</span></div></td>
+                                <td><code>${d.ip}</code></td>
+                                <td id="signal-table-${i}" class="signal-text">—</td>
+                                <td id="ver-table-${i}">Lade...</td>
+                                <td class="col-status"><span class="status-pill checking" id="status-table-${i}">Prüfen</span></td>
+                                <td class="col-state" id="state-table-${i}">—</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        tableContainer.innerHTML = html;
+    }
+
+    function setViewMode(mode) {
+        currentView = mode;
+        const cardsVisible = mode === 'cards';
+        cardsContainer.classList.toggle('hidden', !cardsVisible);
+        tableContainer.classList.toggle('hidden', cardsVisible);
+        if (viewButton) {
+            viewButton.innerText = cardsVisible ? 'Tabelle' : 'Kachelansicht';
+            viewButton.setAttribute('aria-pressed', cardsVisible ? 'false' : 'true');
+        }
+        try { sessionStorage.setItem('viewMode', mode); } catch (e) { }
+    }
+
+    function initViewMode() {
+        try {
+            const stored = sessionStorage.getItem('viewMode');
+            if (stored === 'table' || stored === 'cards') {
+                setViewMode(stored);
+                return;
+            }
+        } catch (e) { }
+        setViewMode('cards');
+    }
+
+    if (viewButton) {
+        viewButton.addEventListener('click', () => setViewMode(currentView === 'cards' ? 'table' : 'cards'));
+    }
+
+    function syncTableStatus(index, statusText, statusClass) {
+        const statusTableEl = document.getElementById(`status-table-${index}`);
+        const rowEl = document.getElementById(`row-${index}`);
+        if (statusTableEl) {
+            statusTableEl.innerText = statusText;
+            statusTableEl.className = `status-pill ${statusClass}`;
+        }
+        if (rowEl) {
+            rowEl.className = statusClass;
+        }
     }
 
     async function checkStatus(device, index) {
@@ -208,9 +308,13 @@
                 statusEl.innerText = "Online";
                 statusEl.className = "status-pill online";
                 cardEl.className = "card online";
-                versionEl.innerText = "v" + (data.StatusFWR ? data.StatusFWR.Version : "Ok");
-                if (data.StatusSTS && data.StatusSTS.Wifi && data.StatusSTS.Wifi.RSSI) {
-                    updateSignalStrength(data.StatusSTS.Wifi.RSSI, index);
+                const versionText = "v" + (data.StatusFWR ? data.StatusFWR.Version : "Ok");
+                versionEl.innerText = versionText;
+                const versionTableEl = document.getElementById(`ver-table-${index}`);
+                if (versionTableEl) versionTableEl.innerText = versionText;
+                syncTableStatus(index, "Online", "online");
+                if (data.StatusSTS && data.StatusSTS.Wifi && data.StatusSTS.Wifi.Signal) {
+                    updateSignalStrength(data.StatusSTS.Wifi.Signal, index);
                 }
                 // Fetch device web UI HTML to discover available action buttons (/cm?cmnd=...)
                 try {
@@ -227,10 +331,12 @@
                                 // update state display if available
                                 if (device._state) {
                                     const stateEl = document.getElementById(`state-${index}`);
-                                    if (stateEl) {
-                                        if (device._state.kind === 'shutter') stateEl.innerText = 'Position: ' + device._state.pos + '%';
-                                        else if (device._state.kind === 'switch') stateEl.innerText = device._state.on ? '🟢 Ein' : '⚫ Aus';
-                                    }
+                                    const stateTableEl = document.getElementById(`state-table-${index}`);
+                                    const stateText = device._state.kind === 'shutter'
+                                        ? 'Position: ' + device._state.pos + '%'
+                                        : (device._state.kind === 'switch' ? (device._state.on ? '🟢 Ein' : '⚫ Aus') : '—');
+                                    if (stateEl) stateEl.innerText = stateText;
+                                    if (stateTableEl) stateTableEl.innerText = stateText;
                                 } else if (parsed.type === 'switch') {
                                     // try fetching .?m=1 to get live l1 status (single targeted request)
                                     try {
@@ -242,7 +348,10 @@
                                             if (parsed2 && parsed2.state) {
                                                 device._state = parsed2.state;
                                                 const stateEl2 = document.getElementById(`state-${index}`);
-                                                if (stateEl2) stateEl2.innerText = device._state.on ? '🟢 Ein' : '⚫ Aus';
+                                                const stateTableEl2 = document.getElementById(`state-table-${index}`);
+                                                const stateText2 = device._state.on ? '🟢 Ein' : '⚫ Aus';
+                                                if (stateEl2) stateEl2.innerText = stateText2;
+                                                if (stateTableEl2) stateTableEl2.innerText = stateText2;
                                             }
                                         }
                                     } catch (e) { /* ignore */ }
@@ -259,15 +368,20 @@
             statusEl.className = "status-pill offline";
             cardEl.className = "card offline";
             versionEl.innerText = "Nicht erreichbar";
+            const versionTableEl = document.getElementById(`ver-table-${index}`);
+            if (versionTableEl) versionTableEl.innerText = "Nicht erreichbar";
+            syncTableStatus(index, "Offline", "offline");
             const stateEl = document.getElementById(`state-${index}`);
             if (stateEl) stateEl.innerText = '—';
+            const stateTableEl = document.getElementById(`state-table-${index}`);
+            if (stateTableEl) stateTableEl.innerText = '—';
             updateSignalStrength(-100, index);
         }
     }
 
     // Reorder card nodes so online devices appear first
     function sortCards() {
-        const grid = document.getElementById('grid');
+        const grid = cardsContainer;
         if (!grid) return;
         const onlineEls = [];
         const offlineEls = [];
@@ -291,6 +405,22 @@
         else if (rssi > -80) strength = 1;
         else strength = 0;
         bars.forEach((bar, i) => bar.classList.toggle('active', i < strength));
+        // Update tooltip with signal strength details
+        let signalText = '—';
+        if (rssi > -100) {
+            let quality = 'Ausgezeichnet';
+            if (rssi > -50) quality = 'Ausgezeichnet';
+            else if (rssi > -60) quality = 'Gut';
+            else if (rssi > -70) quality = 'Befriedigend';
+            else if (rssi > -80) quality = 'Schwach';
+            else quality = 'Sehr schwach';
+            wifiEl.title = `Signal: ${rssi} dBm (${quality})`;
+            signalText = `${rssi} dBm`;
+        } else {
+            wifiEl.title = 'Signal: —';
+        }
+        const signalTableEl = document.getElementById(`signal-table-${index}`);
+        if (signalTableEl) signalTableEl.innerText = signalText;
     }
 
     // Parse device HTML to discover UI bindings for ids o1/o2 and detect type.
@@ -537,6 +667,8 @@
 
     initDarkMode();
     createCards();
+    createTable();
+    initViewMode();
     refreshAll();
     setInterval(refreshAll, 60000); // Jede Minute aktualisieren
 </script>
